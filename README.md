@@ -5,3 +5,7 @@
  to run install all libraries  
   run the train_models.py  
   in terminal type streamlit run app.py
+
+
+#TODO: fix stress and fragility not barely going down 
+#TODO: next message prediction thing idk if it work good or not

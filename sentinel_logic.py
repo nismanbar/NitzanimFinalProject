@@ -1,102 +1,128 @@
 import json, os, pandas as pd, numpy as np, pickle
 from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 from transformers import pipeline
 
 
 class SentinelLogic:
     def __init__(self, history_file="chat_history.json"):
-        self.history_file = history_file
+        self.history_file, self.state_file = history_file, "model_state.json"
         self.nlp = load_model('sentinel_nlp.keras')
         with open('tokenizer.pkl', 'rb') as f: self.tokenizer = pickle.load(f)
         with open('resilience.pkl', 'rb') as f: self.resilience = pickle.load(f)
+        with open('mental_model.pkl', 'rb') as f: self.mental_model = pickle.load(f)
 
-        # Public Models (No Hardcoding)
         self.toxic_pipe = pipeline("text-classification", model="unitary/toxic-bert")
         self.emotion_pipe = pipeline("text-classification", model="j-hartmann/emotion-english-distilroberta-base",
                                      top_k=None)
 
-        if not os.path.exists(self.history_file):
+        self._init_files()
+        self.load_state()
+
+    def _init_files(self, force_reset=False):
+        if force_reset or not os.path.exists(self.history_file):
             with open(self.history_file, 'w') as f: json.dump([], f)
+        if force_reset or not os.path.exists(self.state_file):
+            # p_sens and u_sens are the "Learned" global sensitivities
+            with open(self.state_file, 'w') as f: json.dump({"u_sens": 1.0, "p_sens": 1.0, "treats": 0}, f)
+
+    def load_state(self):
+        with open(self.state_file, 'r') as f: self.state = json.load(f)
+
+    def save_state(self, custom_state=None):
+        target = custom_state if custom_state else self.state
+        with open(self.state_file, 'w') as f: json.dump(target, f)
+        self.state = target
+
+    def get_auto_metrics(self):
+        with open(self.history_file, 'r') as f: history = json.load(f)
+        chat_volume = min(len(history), 50)
+        peer_msgs = [m['score'] for m in history if m['role'] == "Peer"]
+        peer_support = 1.0 - np.mean(peer_msgs) if peer_msgs else 0.5
+        return chat_volume, peer_support
+
+    def get_forecast(self, sleep, screen, current_stress, prev_stress):
+        with open(self.history_file, 'r') as f:
+            history = json.load(f)
+        chat_volume, peer_support = self.get_auto_metrics()
+
+        # 1. PEER PREDICTION
+        p_risks = [m['score'] for m in history if m['role'] == "Peer"][-5:]
+        # NEW: If no history, default to a neutral 0.5 (50%) adjusted by learned global sensitivity
+        if not p_risks:
+            pred_p = 0.5 * self.state.get("p_sens", 1.0)
+        else:
+            p_slope = np.polyfit(np.arange(len(p_risks)), p_risks, 1)[0] if len(p_risks) > 1 else 0
+            pred_p = (p_risks[-1] + p_slope) * self.state.get("p_sens", 1.0)
+
+        # 2. USER PREDICTION
+        df_rf = pd.DataFrame([{
+            "sleep_hours": sleep, "screen_time_hours": screen,
+            "chat_volume": chat_volume, "peer_support_score": peer_support,
+            "internal_stress": current_stress, "stress_trend": current_stress - prev_stress
+        }])
+
+        mental_risk_prob = self.mental_model.predict_proba(df_rf)[0][1]
+
+        # Small deterministic adjustment so screen time never reduces risk
+        screen_boost = max(0, screen - 4.0) * 0.015
+        sleep_buffer = max(0, sleep - 8.0) * 0.01  # very mild relief for good sleep
+
+        adjusted_mental_risk = mental_risk_prob + screen_boost - sleep_buffer
+        adjusted_mental_risk = float(np.clip(adjusted_mental_risk, 0, 1))
+
+        u_risks = [m['score'] for m in history if m['role'] == "User"][-5:]
+        sentiment_momentum = np.mean(u_risks) if u_risks else 0.5
+
+        pred_u = (0.6 * adjusted_mental_risk) + (0.4 * sentiment_momentum)
+        pred_u = pred_u * self.state.get("u_sens", 1.0)
+
+        return {
+            "user": float(np.clip(pred_u, 0, 1)), "peer": float(np.clip(pred_p, 0, 1)),
+            "status": "High Alert" if pred_u > 0.75 or pred_p > 0.75 else "Stable"
+        }
+
+    def update_learning(self, role, actual, predicted):
+        error = actual - predicted
+        key = "u_sens" if role == "User" else "p_sens"
+        # Global learning stays preserved across chat clears
+        self.state[key] = np.clip(self.state.get(key, 1.0) + (error * 0.05), 0.7, 1.8)
+        self.save_state()
 
     def get_contextual_score(self, text):
         t_low = text.lower().strip()
-
-        # 1. Message-Level Inference
-        tox_res = self.toxic_pipe(t_low)[0]
-        tox_score = tox_res['score'] if tox_res['label'] != 'neutral' else 0.0
-
-        emo_res = self.emotion_pipe(t_low)[0]
-        emo_scores = {e['label']: e['score'] for e in emo_res}
-        # Detect Sadness, Fear, or Anger
-        vibe_score = max(emo_scores.get('sadness', 0), emo_scores.get('fear', 0), emo_scores.get('anger', 0))
-
-        # 2. Conversation-Level Memory (THE BRAIN)
-        with open(self.history_file, 'r') as f:
-            history = json.load(f)
-
-        if not history:
-            return max(tox_score, vibe_score)
-
-        # Calculate "Conversation Momentum"
-        # We look at the average risk of the last 4 messages
-        past_risks = [m['score'] for m in history[-4:]]
-        momentum = sum(past_risks) / len(past_risks)
-
-        # 3. Decision Engine
-        # If the conversation is already "Hot" (High momentum),
-        # even a neutral message is treated as a 50% risk minimum.
-        if momentum > 0.6:
-            # The AI "remembers" the crisis and stays alert
-            final_score = max(tox_score, vibe_score, momentum * 0.9)
-        else:
-            final_score = max(tox_score, vibe_score)
-
-        return final_score
+        tox = self.toxic_pipe(t_low)[0]
+        tox_score = tox['score'] if tox['label'] != 'neutral' else 0.0
+        emo = {e['label']: e['score'] for e in self.emotion_pipe(t_low)[0]}
+        # Capture self-harm/high-risk emotions specifically
+        risk_score = max(tox_score, emo.get('sadness', 0), emo.get('fear', 0), emo.get('anger', 0))
+        return risk_score
 
     def log_message(self, role, text, score):
-        with open(self.history_file, 'r') as f:
-            history = json.load(f)
+        with open(self.history_file, 'r') as f: history = json.load(f)
         history.append({"role": role, "text": text, "score": score})
-        with open(self.history_file, 'w') as f:
-            json.dump(history[-15:], f)  # Increased memory window
+        with open(self.history_file, 'w') as f: json.dump(history[-30:], f)
 
-    def get_fragility(self, sleep, stress):
-        df = pd.DataFrame([[sleep, stress]], columns=["sleep_hours", "stress_level"])
-        return np.clip(float(self.resilience.predict(df)[0]), 0, 1)
-
-    def get_forecast(self):
-        with open(self.history_file, 'r') as f:
-            history = json.load(f)
-
-        # If the chat is just starting, we return neutral "placeholders"
-        if len(history) < 3:
-            return 0.0, "Gathering Data...", 0.50  # Added the 0.50 (Confidence) here
-
-        # 1. Calculate the Trend (Slope)
-        recent_scores = [m['score'] for m in history[-5:]]
-        x = np.arange(len(recent_scores))
-        y = np.array(recent_scores)
-
-        # Linear regression to find the trend
-        slope, intercept = np.polyfit(x, y, 1)
-
-        # 2. Predict the Next Score
-        prediction = np.clip(slope * (len(recent_scores)) + intercept, 0, 1)
-
-        # 3. Calculate Confidence (how steady the trend is)
-        variance = np.var(recent_scores)
-        confidence = np.clip(1.0 - variance, 0.5, 0.99)
-
-        # 4. Status Mapping
-        if prediction > 0.75:
-            status = "High Risk"
-        elif slope > 0.1:
-            status = "Rising"
-        elif slope < -0.1:
-            status = "Falling"
+    def get_fragility(self, sleep, stress, screen_time):
+        # Sleep curve: still U-shaped, but gentler than before
+        if sleep < 7:
+            # below 7 hours: rising fragility, but not too extreme
+            sleep_mult = 1.0 + ((7 - sleep) ** 2) * 0.010
+        elif 7 <= sleep <= 9:
+            # optimal zone
+            sleep_mult = 1.0
         else:
-            status = "Stable"
+            # above 9 hours: only a mild increase
+            sleep_mult = 1.0 + (sleep - 9) * 0.025
 
-        # THE FIX: This line MUST have 3 values to match your app.py
-        return float(prediction), status, float(confidence)
+        # Screen time should increase fragility a bit more clearly
+        # Baseline starts after 4 hours
+        screen_impact = max(0, screen_time - 4.0) * 0.03
+
+        # Base calculation from model
+        df = pd.DataFrame([[sleep, stress]], columns=["sleep_hours", "stress_level"])
+        base_fragility = float(self.resilience.predict(df)[0])
+
+        # Combine
+        total_fragility = (base_fragility * sleep_mult) + screen_impact
+
+        return np.clip(total_fragility, 0, 0.98)

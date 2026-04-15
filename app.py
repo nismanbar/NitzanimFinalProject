@@ -879,5 +879,10 @@ with log_box:
                 """,
                 unsafe_allow_html=True,
             )
-    else:
-        st.caption("No recommendations yet.")
+if __name__ == "__main__":
+    import os
+    print("\n" + "="*50)
+    print("ERROR: You are trying to run the Streamlit dashboard as a script.")
+    print("To run the Dashboard: 'streamlit run app.py'")
+    print("To run the API Server: 'python api/app.py'")
+    print("="*50 + "\n")

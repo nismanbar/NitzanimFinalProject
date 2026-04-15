@@ -1,0 +1,87 @@
+.sentinel-alert {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 320px;
+    padding: 16px;
+    border-radius: 12px;
+    background: #1a1a2e;
+    color: white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 999999;
+    animation: sentinel-slide 0.3s ease-out;
+    display: flex;
+    gap: 12px;
+}
+
+@keyframes sentinel-slide {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.sentinel-high {
+    border-left: 4px solid #ef4444;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), #1a1a2e);
+}
+
+.sentinel-medium {
+    border-left: 4px solid #f59e0b;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), #1a1a2e);
+}
+
+.sentinel-low {
+    border-left: 4px solid #3b82f6;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), #1a1a2e);
+}
+
+.sentinel-icon {
+    font-size: 28px;
+    line-height: 1;
+}
+
+.sentinel-content {
+    flex: 1;
+}
+
+.sentinel-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+    color: #f8fafc;
+}
+
+.sentinel-message {
+    font-size: 13px;
+    line-height: 1.4;
+    color: #e2e8f0;
+    margin-bottom: 8px;
+}
+
+.sentinel-details {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 10px;
+}
+
+.sentinel-dismiss {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #94a3b8;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sentinel-dismiss:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+}

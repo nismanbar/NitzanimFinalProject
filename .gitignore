@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# IDEs
+.idea/
+.vscode/
+
+# Project-specific Data & Models
+*.pkl
+*.keras
+*.csv
+*.json
+sentinel_data.json
+chat_history.json
+dataset_report.json
+model_state.json
+sentinel_config.json

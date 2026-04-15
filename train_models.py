@@ -1,3 +1,4 @@
+
 import os
 import json
 import pickle
@@ -26,6 +27,11 @@ def load_csv(filename: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def save_json(filename: str, data: dict) -> None:
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 def build_dataset_report():
     print("\n--- Dataset Report ---")
 
@@ -38,7 +44,6 @@ def build_dataset_report():
 
     mental["next_stress"] = mental.groupby("student_id")["stress_level"].shift(-1)
     mental["stress_increase"] = (mental["next_stress"] > mental["stress_level"]).astype(int)
-
     mental["stress_trend"] = mental.groupby("student_id")["stress_level"].diff()
     mental["mood_drop"] = -mental.groupby("student_id")["mood"].diff()
 
@@ -50,8 +55,8 @@ def build_dataset_report():
             np.where(
                 mental["sleep_hours"] <= 9,
                 1,
-                1 + (mental["sleep_hours"] - 9) * 0.025
-            )
+                1 + (mental["sleep_hours"] - 9) * 0.025,
+            ),
         )
         + np.maximum(0, mental["screen_time_hours"] - 4.0) * 0.03
     )
@@ -111,10 +116,63 @@ def build_dataset_report():
         ),
     }
 
-    with open("dataset_report.json", "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
-
+    save_json("dataset_report.json", report)
     print("✔ dataset_report.json saved.")
+
+
+def build_sentinel_config():
+    """
+    Runtime configuration shared by train_models.py and the app logic.
+    These are calibration defaults, not hard-coded phrases.
+    """
+    config = {
+        "pattern_models": {
+            "zero_shot_model_id": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+            "dialog_act_model_id": "diwank/dyda-deberta-pair",
+        },
+        "risk_weights": {
+            "base": {
+                "toxicity_severity": 0.40,
+                "local_toxicity": 0.20,
+                "hf_toxicity": 0.12,
+                "emotion_risk": 0.08,
+                "cyber_boost": 0.05,
+            },
+            "pattern": {
+                "supportive_reassurance": -0.08,
+                "neutral_casual_chat": 0.00,
+                "casual_exaggeration": 0.02,
+                "mild_frustration": 0.06,
+                "distress_hopelessness": 0.18,
+                "repair_apology": -0.06,
+                "harmful_escalation": 0.72,
+                "explicit_self_harm_intent": 0.95,
+            },
+            "dialog_act": {
+                "directive": 0.22,
+                "commissive": 0.16,
+                "inform": 0.00,
+                "question": 0.00,
+                "dummy": 0.00,
+            },
+            "forecast": {
+                "user_pattern": 0.20,
+                "peer_pattern": 0.20,
+                "user_momentum": 0.16,
+                "peer_pressure": 0.18,
+                "supportive_relief": 0.10,
+            },
+        },
+        "thresholds": {
+            "user_high": 0.80,
+            "peer_high": 0.70,
+            "user_check_in": 0.45,
+            "peer_concern": 0.45,
+        },
+    }
+
+    save_json("sentinel_config.json", config)
+    print("✔ sentinel_config.json saved.")
 
 
 def build_resilience():
@@ -146,7 +204,7 @@ def build_resilience():
         "sleep_hours": sleep,
         "stress_level": stress,
         "screen_time_hours": screen,
-        "target": np.clip(vulnerability, 0, 0.98)
+        "target": np.clip(vulnerability, 0, 0.98),
     })
 
     X = df[["sleep_hours", "stress_level", "screen_time_hours"]]
@@ -158,7 +216,7 @@ def build_resilience():
         learning_rate=0.05,
         subsample=0.9,
         colsample_bytree=0.9,
-        random_state=42
+        random_state=42,
     )
     model.fit(X, y)
 
@@ -220,7 +278,7 @@ def build_mental_health_model():
         n_estimators=100,
         max_depth=10,
         random_state=42,
-        class_weight="balanced"
+        class_weight="balanced",
     )
     model.fit(X_train, y_train)
 
@@ -257,14 +315,14 @@ def build_toxicity_model():
         toxic["tox_any"],
         test_size=0.2,
         random_state=42,
-        stratify=toxic["tox_any"]
+        stratify=toxic["tox_any"],
     )
 
     toxicity_model = Pipeline([
         ("tfidf", TfidfVectorizer(
             min_df=3,
             max_features=40000,
-            ngram_range=(1, 2)
+            ngram_range=(1, 2),
         )),
         ("clf", SGDClassifier(
             loss="log_loss",
@@ -272,7 +330,7 @@ def build_toxicity_model():
             max_iter=1500,
             tol=1e-3,
             class_weight="balanced",
-            random_state=42
+            random_state=42,
         ))
     ])
     toxicity_model.fit(X_train, y_train)
@@ -288,16 +346,16 @@ def build_toxicity_model():
         toxic["comment_text"],
         toxic["toxicity_severity"],
         test_size=0.2,
-        random_state=42
+        random_state=42,
     )
 
     severity_model = Pipeline([
         ("tfidf", TfidfVectorizer(
             min_df=3,
             max_features=40000,
-            ngram_range=(1, 2)
+            ngram_range=(1, 2),
         )),
-        ("reg", Ridge(alpha=1.0))
+        ("reg", Ridge(alpha=1.0)),
     ])
     severity_model.fit(X_train_s, y_train_s)
 
@@ -328,14 +386,14 @@ def build_cyberbullying_model():
         cyber["cyberbullying_type"],
         test_size=0.2,
         random_state=42,
-        stratify=cyber["cyberbullying_type"]
+        stratify=cyber["cyberbullying_type"],
     )
 
     cyber_model = Pipeline([
         ("tfidf", TfidfVectorizer(
             min_df=2,
             max_features=30000,
-            ngram_range=(1, 2)
+            ngram_range=(1, 2),
         )),
         ("clf", SGDClassifier(
             loss="log_loss",
@@ -343,7 +401,7 @@ def build_cyberbullying_model():
             max_iter=1500,
             tol=1e-3,
             class_weight="balanced",
-            random_state=42
+            random_state=42,
         ))
     ])
     cyber_model.fit(X_train, y_train)
@@ -383,6 +441,7 @@ def build_placeholder_nlp():
 
 if __name__ == "__main__":
     build_dataset_report()
+    build_sentinel_config()
     build_resilience()
     build_mental_health_model()
     build_toxicity_model()

@@ -1,6 +1,6 @@
 # NitzanimFinalProject
 
-*toxic comments thing is too big i dont remember if its needed add it yourself just incase*
+**toxic comments thing is too big add it yourself to run**
 
  to run install all libraries  
   run the train_models.py  
